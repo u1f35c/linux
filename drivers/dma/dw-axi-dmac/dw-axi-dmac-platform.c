@@ -1292,6 +1292,7 @@ static int axi_dma_suspend(struct axi_dma_chip *chip)
 
 	clk_disable_unprepare(chip->core_clk);
 	clk_disable_unprepare(chip->cfgr_clk);
+	clk_disable_unprepare(chip->axi_clk);
 
 	return 0;
 }
@@ -1299,6 +1300,10 @@ static int axi_dma_suspend(struct axi_dma_chip *chip)
 static int axi_dma_resume(struct axi_dma_chip *chip)
 {
 	int ret;
+
+	ret = clk_prepare_enable(chip->axi_clk);
+	if (ret < 0)
+		return ret;
 
 	ret = clk_prepare_enable(chip->cfgr_clk);
 	if (ret < 0)
@@ -1489,6 +1494,10 @@ static int dw_probe(struct platform_device *pdev)
 			return PTR_ERR(chip->apb_regs);
 	}
 
+	chip->axi_clk = devm_clk_get(chip->dev, "stg_clk");
+	if (IS_ERR(chip->axi_clk))
+		return PTR_ERR(chip->axi_clk);
+
 	chip->core_clk = devm_clk_get(chip->dev, "core-clk");
 	if (IS_ERR(chip->core_clk))
 		return PTR_ERR(chip->core_clk);
@@ -1497,6 +1506,11 @@ static int dw_probe(struct platform_device *pdev)
 	if (IS_ERR(chip->cfgr_clk))
 		return PTR_ERR(chip->cfgr_clk);
 
+	chip->rst_axi = devm_reset_control_get_exclusive(&pdev->dev, "rst_stg");
+	if (IS_ERR(chip->rst_axi)) {
+		dev_err(&pdev->dev, "%s: failed to get rst_stg reset control\n", __func__);
+		return PTR_ERR(chip->rst_axi);
+	}
 	chip->rst_core = devm_reset_control_get_exclusive(&pdev->dev, "rst_axi");
 	if (IS_ERR(chip->rst_core)) {
 		dev_err(&pdev->dev, "%s: failed to get rst_core reset control\n", __func__);
@@ -1508,6 +1522,7 @@ static int dw_probe(struct platform_device *pdev)
 		return PTR_ERR(chip->rst_cfgr);
 	}
 
+	reset_control_deassert(chip->rst_axi);
 	reset_control_deassert(chip->rst_core);
 	reset_control_deassert(chip->rst_cfgr);
 
@@ -1623,6 +1638,7 @@ static int dw_remove(struct platform_device *pdev)
 	u32 i;
 
 	/* Enable clk before accessing to registers */
+	clk_prepare_enable(chip->axi_clk);
 	clk_prepare_enable(chip->cfgr_clk);
 	clk_prepare_enable(chip->core_clk);
 	axi_dma_irq_disable(chip);
